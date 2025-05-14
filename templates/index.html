@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  body {
+    background: url('/static/images/images.jpeg') no-repeat center center fixed;
+    background-size: cover;
+    font-family: 'Segoe UI', sans-serif;
+  }
+
+  .main-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 30px;
+    color: white;
+  }
+
+  .top-bar {
+    display: flex;
+    justify-content: space-between;
+    width: 90%;
+    margin-bottom: 20px;
+    align-items: center;
+  }
+
+  .creator-box, .title-box, .image-area-box {
+    background: rgba(255, 255, 255, 0.9);
+    color: black;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-weight: bold;
+  }
+
+  .webcam-section {
+    display: flex;
+    flex-direction: row;
+    gap: 40px;
+    margin-top: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 20px;
+    backdrop-filter: blur(5px);
+  }
+
+  #video {
+    width: 320px;
+    height: auto;
+    border-radius: 15px;
+    background-color: #ccc;
+  }
+
+  #result-textbox {
+    margin-top: 10px;
+    width: 100%;
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 1.1em;
+    white-space: normal;
+    word-wrap: break-word;
+  }
+
+  .btn-style {
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 15px;
+    background-color: #f2f2f2;
+    border: none;
+    font-size: 1em;
+    cursor: pointer;
+  }
+  .btn-start {
+    padding: 12px;
+    margin-top: 10px;
+    border-radius: 15px;
+    background-color: #00098a;
+    color: #FFFFFF;
+    border: none;
+    font-size: 1em;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  select, .btn-style, input {
+    width: 100%;
+  }
+
+  .form-group {
+    margin-top: 15px;
+  }
+
+  .controls-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    width: 100%;
+  }
+
+  .image-preview img {
+    max-width: 100%;
+    border-radius: 15px;
+  }
+</style>
+<div class="main-container">
+
+  <div class="webcam-section">
+    <div>
+      <video id="video" autoplay muted></video>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <div class="form-group" style="margin-top: 20px;"></div>
+      <div class="form-group" style="margin-top: 20px;">
+        <label>You said :</label>
+        <input type="text" id="result-textbox" readonly>
+      </div>
+      <div id="image-container" class="image-preview" style="display:none;">
+        <img id="uploaded-image" alt="Processed Image">
+      </div>
+    </div>
+
+    <div class="controls-section">
+      <!-- Hidden input for object to be found -->
+      <div id="object_to_be_found_container" style="display:none;">
+        <label for="object_to_be_found">Object to Find:</label>
+        <input type="text" id="object_to_be_found">
+      </div>
+      
+      <!-- Hidden input for select mode -->
+      <input type="hidden" id="select_mode" value="">
+      <!-- Feedback for voice recognition -->
+      <div id="voice-feedback"></div>
+      <div class="form-group">
+        <label>Detection Language</label>
+        <select id="language-selector" class="btn-style" onchange="setRecognitionLanguage()">
+          <option value="en-US">English</option>
+          <option value="ar-SA">Arabic</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <button class="btn-start" onclick="startVoiceRecognition()">Start Voice Recognition</button>
+      </div>
+
+      <!-- New Read-Only Field -->
+      <div class="form-group" style="display: flex; flex-direction: column; justify-content: flex-end; height: 100%; width: 100%;">
+        <label style="font-size: 1em; margin-bottom: 5px;">Detection Result :</label>
+        <textarea id="read-only-field" readonly style="flex-grow: 1; height: auto; border-radius: 15px; padding: 10px; text-align: left; width: 100%; box-sizing: border-box; overflow-y: auto; word-wrap: break-word; white-space: pre-wrap; font-size: 1em; resize: none;"></textarea>
+      </div>
+    </div>
+  </div>
+  <div style="display: flex; align-items: center;">
+    <!--<img src="/static/images/IMG_3494_1.png" alt="creator" style="height: 40px; width: 40px; border-radius: 50%; margin-right: 10px;">
+    <span>Created by <strong>Eng. Ahmed Yasser</strong></span> -->
+  </div>
+</div>
+<script>
+let recognition;
+
+// Initialize voice recognition
+function initializeRecognition() {
+  if (!('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
+    alert("Speech Recognition API is not supported in your browser. Please use a compatible browser.");
+    return;
+  }
+  recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = document.getElementById("language-selector").value; // Set language dynamically
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    document.getElementById("result-textbox").value = "Listening for a command...";
+  };
+  recognition.onerror = (event) => {
+    const errorMessage = `Error: ${event.error}`;
+    updateFeedback(errorMessage);
+    document.getElementById("result-textbox").value = errorMessage;
+  };
+  recognition.onresult = (event) => {
+    handleVoiceCommand(event);
+    document.getElementById("result-textbox").value = event.results[0][0].transcript;
+  };
+}
+
+// Handle voice commands
+function handleVoiceCommand(event) {
+  const voiceCommand = event.results[0][0].transcript.toLowerCase();
+  const currentLanguage = document.getElementById("language-selector").value;
+
+  const modeMapping = {
+    "en-US": {
+      "find": () => {
+        const objectToFind = voiceCommand.replace("find", "").trim();
+        document.getElementById('object_to_be_found').value = objectToFind;
+        selectMode("find");
+      },
+      "detect": () => selectMode("object"),
+      "currency": () => selectMode("currency"),
+      "describe": () => selectMode("describe"),
+      "text": () => selectMode("text"),
+      "summarize": () => selectMode("summarize")
+    },
+    "ar-SA": {
+      "ابحث": () => {
+        const objectToFind = voiceCommand.replace("ابحث", "").trim();
+        document.getElementById('object_to_be_found').value = objectToFind;
+        selectMode("find");
+      },
+      "كشف": () => selectMode("object"),
+      "عمله": () => selectMode("currency"),
+      "وصف": () => selectMode("describe"),
+      "نص": () => selectMode("text"),
+      "تلخيص": () => selectMode("summarize")
+    }
+  };
+
+  const commands = modeMapping[currentLanguage];
+  const matchedCommand = Object.keys(commands).find(cmd => voiceCommand.includes(cmd));
+  if (matchedCommand) {
+    commands[matchedCommand]();
+    captureAndSend(); // Automatically capture and process after recognizing the command
+  } else {
+    updateFeedback("Sorry, I didn't understand the command.");
+  }
+}
+
+// Update feedback text
+function updateFeedback(message) {
+  document.getElementById("voice-feedback").innerText = message;
+}
+
+// Start voice recognition
+function startVoiceRecognition() {
+  if (!recognition) initializeRecognition();
+  recognition.lang = document.getElementById("language-selector").value; // Update language before starting
+  recognition.start();
+}
+
+// Select mode and toggle object input visibility
+function selectMode(mode) {
+  document.getElementById("select_mode").value = mode;
+  document.getElementById("object_to_be_found_container").style.display = (mode === "find") ? "block" : "none";
+  console.log("Selected mode:", mode);
+}
+
+// Capture and send the frame
+function captureAndSend() {
+  const canvas = document.getElementById('canvas');
+  const video = document.getElementById('video');
+  const ctx = canvas.getContext('2d');
+
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  canvas.toBlob(blob => {
+    const formData = new FormData();
+    formData.append('image', blob, 'frame.jpg');
+    formData.append('select_mode', document.getElementById('select_mode').value);
+    formData.append('object_to_be_found', document.getElementById('object_to_be_found').value);
+
+    sendToServer(formData);
+  }, 'image/jpeg');
+}
+
+// Send data to the server
+function sendToServer(formData) {
+  fetch('/detect', { method: 'POST', body: formData })
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`Server responded with status: ${res.status}`);
+      }
+      return res.json();
+    })
+    .then(data => {
+      if (data && data[0] && data[0].result) {
+        let resultText = data[0].result;
+
+        // Check if the selected language is Arabic
+        const selectedLanguage = document.getElementById("language-selector").value;
+        if (selectedLanguage === "ar-SA") {
+          // Translate the result to Arabic
+          translateToArabic(resultText).then(translatedText => {
+            updateFeedback(translatedText); // Update the "You said" field
+            document.getElementById("read-only-field").value = translatedText; // Update the "Detection Result" field
+            speak(translatedText); // Speak the translated result
+          });
+        } else {
+          updateFeedback(resultText); // Update the "You said" field
+          document.getElementById("read-only-field").value = resultText; // Update the "Detection Result" field
+          speak(resultText); // Speak the result
+        }
+
+        if (data[0].image_url) {
+          displayImage(data[0].image_url);
+        }
+      } else {
+        updateFeedback("Unexpected response format from the server.");
+      }
+    })
+    .catch(err => {
+      console.error("Error during processing:", err);
+      updateFeedback("Error during processing. Please try again.");
+    });
+}
+
+// Display the uploaded image
+function displayImage(imageUrl) {
+  const imageContainer = document.getElementById('image-container');
+  const uploadedImage = document.getElementById('uploaded-image');
+  uploadedImage.src = imageUrl;
+  imageContainer.style.display = 'block';
+}
+
+// Convert text to speech
+function speak(text) {
+  const utterance = new SpeechSynthesisUtterance(text);
+  const selectedLanguage = document.getElementById("language-selector").value;
+
+  // Set the language for speech synthesis
+  utterance.lang = selectedLanguage;
+
+  // Adjust voice settings for Arabic
+  if (selectedLanguage === "ar-SA") {
+    utterance.voice = speechSynthesis.getVoices().find(voice => voice.lang === "ar-SA");
+  }
+
+  window.speechSynthesis.speak(utterance);
+}
+
+// Start the webcam
+function startWebcam() {
+  navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => document.getElementById("video").srcObject = stream)
+    .catch(err => alert("Error accessing webcam: " + err));
+}
+
+function translateToArabic(text) {
+  const apiUrl = "https://api.mymemory.translated.net/get"; // Example translation API
+  const params = new URLSearchParams({
+    q: text,
+    langpair: "en|ar"
+  });
+
+  return fetch(`${apiUrl}?${params}`)
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`Translation API responded with status: ${res.status}`);
+      }
+      return res.json();
+    })
+    .then(data => {
+      if (data && data.responseData && data.responseData.translatedText) {
+        return data.responseData.translatedText;
+      } else {
+        console.error("Unexpected translation API response:", data);
+        return text; // Fallback to original text if translation fails
+      }
+    })
+    .catch(err => {
+      console.error("Error during translation:", err);
+      return text; // Fallback to original text if translation fails
+    });
+}
+
+  if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+    startVoiceRecognition(); // Automatically start voice recognition on page load
+  }
+window.onload = () => {
+  initializeRecognition();
+  startWebcam();
+  startVoiceRecognition(); // Automatically start voice recognition on page load
+};
+</script>
+{% endblock %}
